@@ -13,41 +13,95 @@ export async function checkNotificationPermission() {
 
 // Show a notification when someone comments on your text
 export function showNewCommentNotification(comment) {
-  chrome.notifications.create(`comment-${Date.now()}`, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('assets/icons/icon128.png'),
-    title: 'New comment on your highlight',
-    message: `${comment.userName}: ${comment.text.substring(0, 100)}${comment.text.length > 100 ? '...' : ''}`,
-    buttons: [
-      { title: 'View' },
-      { title: 'Dismiss' }
-    ],
-    priority: 1,
-    requireInteraction: false
+  // Check if notifications are enabled
+  chrome.storage.sync.get(['enableNotifications'], (result) => {
+    if (result.enableNotifications === false) {
+      return; // Don't show notification if disabled
+    }
+    
+    const notificationId = `comment-${Date.now()}`;
+    
+    // Store the comment data with the notification ID for later retrieval
+    chrome.storage.local.set({
+      [notificationId]: {
+        url: comment.url,
+        commentId: comment.id,
+        anchor: comment.anchor
+      }
+    });
+    
+    chrome.notifications.create(notificationId, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('assets/icons/icon128.png'),
+      title: 'New comment on your highlight',
+      message: `${comment.userName}: ${comment.text.substring(0, 100)}${comment.text.length > 100 ? '...' : ''}`,
+      buttons: [
+        { title: 'View' },
+        { title: 'Dismiss' }
+      ],
+      priority: 1,
+      requireInteraction: false
+    });
   });
 }
 
 // Show a notification when someone reacts to your comment
-export function showReactionNotification(userName, emoji) {
-  chrome.notifications.create(`reaction-${Date.now()}`, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('assets/icons/icon128.png'),
-    title: 'New reaction to your comment',
-    message: `${userName} reacted with ${emoji}`,
-    priority: 0,
-    requireInteraction: false
+export function showReactionNotification(userName, emoji, comment) {
+  // Check if notifications are enabled
+  chrome.storage.sync.get(['enableNotifications'], (result) => {
+    if (result.enableNotifications === false) {
+      return; // Don't show notification if disabled
+    }
+    
+    const notificationId = `reaction-${Date.now()}`;
+    
+    // Store the comment data for later retrieval
+    chrome.storage.local.set({
+      [notificationId]: {
+        url: comment.url,
+        commentId: comment.id,
+        anchor: comment.anchor
+      }
+    });
+    
+    chrome.notifications.create(notificationId, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('assets/icons/icon128.png'),
+      title: 'New reaction to your comment',
+      message: `${userName} reacted with ${emoji}`,
+      priority: 0,
+      requireInteraction: false
+    });
   });
 }
 
 // Show a notification when someone upvotes your comment
-export function showUpvoteNotification(userName) {
-  chrome.notifications.create(`upvote-${Date.now()}`, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('assets/icons/icon128.png'),
-    title: 'Your comment was upvoted',
-    message: `${userName} upvoted your comment`,
-    priority: 0,
-    requireInteraction: false
+export function showUpvoteNotification(userName, comment) {
+  // Check if notifications are enabled
+  chrome.storage.sync.get(['enableNotifications'], (result) => {
+    if (result.enableNotifications === false) {
+      return; // Don't show notification if disabled
+    }
+    
+    const notificationId = `upvote-${Date.now()}`;
+    
+    // Store the comment data for later retrieval
+    chrome.storage.local.set({
+      [notificationId]: {
+        url: comment.url,
+        commentId: comment.id,
+        anchor: comment.anchor
+      }
+    });
+    
+    chrome.notifications.create(notificationId, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('assets/icons/icon128.png'),
+      title: 'Your comment was upvoted',
+      message: `${userName} upvoted your comment`,
+      priority: 0,
+      requireInteraction: false
+    });
   });
 }
 
@@ -55,15 +109,24 @@ export function showUpvoteNotification(userName) {
 chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
   if (notificationId.startsWith('comment-')) {
     if (buttonIndex === 0) {
-      // View button clicked - open the comment popover
-      // You can send a message to content script to open popover
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, {
-            action: 'openCommentFromNotification',
-            notificationId: notificationId
+      // View button clicked - retrieve stored comment data
+      chrome.storage.local.get([notificationId], (result) => {
+        const commentData = result[notificationId];
+        if (commentData && commentData.url) {
+          // Open the page with the comment
+          chrome.tabs.create({ url: commentData.url }, (tab) => {
+            // Wait for the tab to load, then send message to open popover
+            setTimeout(() => {
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'openCommentFromNotification',
+                commentId: commentData.commentId,
+                anchor: commentData.anchor
+              });
+            }, 2000); // Give page time to load
           });
         }
+        // Clean up stored data
+        chrome.storage.local.remove([notificationId]);
       });
     }
     // Clear the notification
@@ -73,12 +136,31 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
 
 // Clear notification when clicked
 chrome.notifications.onClicked.addListener((notificationId) => {
-  chrome.notifications.clear(notificationId);
-  
-  // Optionally open the relevant page
-  if (notificationId.startsWith('comment-')) {
-    // Handle opening the comment
+  // Handle all types of notifications (comment, reaction, upvote)
+  if (notificationId.startsWith('comment-') || 
+      notificationId.startsWith('reaction-') || 
+      notificationId.startsWith('upvote-')) {
+    // Retrieve stored comment data
+    chrome.storage.local.get([notificationId], (result) => {
+      const commentData = result[notificationId];
+      if (commentData && commentData.url) {
+        // Open the page with the comment
+        chrome.tabs.create({ url: commentData.url }, (tab) => {
+          // Wait for the tab to load, then send message to open popover
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'openCommentFromNotification',
+              commentId: commentData.commentId,
+              anchor: commentData.anchor
+            });
+          }, 2000); // Give page time to load
+        });
+      }
+      // Clean up stored data
+      chrome.storage.local.remove([notificationId]);
+    });
   }
+  chrome.notifications.clear(notificationId);
 });
 
 // Example usage in background.js:

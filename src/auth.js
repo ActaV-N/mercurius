@@ -19,6 +19,7 @@ function init() {
   setupEventListeners();
   checkAuthState();
   loadHighlightSetting();
+  loadNotificationSetting();
 }
 
 // Event Listeners
@@ -29,6 +30,11 @@ function setupEventListeners() {
   
   if (highlightToggle) {
     highlightToggle.addEventListener('change', handleHighlightToggle);
+  }
+  
+  const notificationToggle = document.getElementById('notification-toggle');
+  if (notificationToggle) {
+    notificationToggle.addEventListener('change', handleNotificationToggle);
   }
 }
 
@@ -90,6 +96,17 @@ function loadHighlightSetting() {
   });
 }
 
+function loadNotificationSetting() {
+  chrome.storage.sync.get(['enableNotifications'], (result) => {
+    // Default to true if not set
+    const enableNotifications = result.enableNotifications !== false;
+    const notificationToggle = document.getElementById('notification-toggle');
+    if (notificationToggle) {
+      notificationToggle.checked = enableNotifications;
+    }
+  });
+}
+
 // Handle highlight toggle change
 function handleHighlightToggle() {
   const showHighlights = highlightToggle.checked;
@@ -102,6 +119,22 @@ function handleHighlightToggle() {
     chrome.runtime.sendMessage({ 
       action: 'highlightSettingChanged', 
       showHighlights 
+    });
+  });
+}
+
+function handleNotificationToggle() {
+  const notificationToggle = document.getElementById('notification-toggle');
+  const enableNotifications = notificationToggle.checked;
+  
+  // Save to storage
+  chrome.storage.sync.set({ enableNotifications }, () => {
+    console.log('Notification setting saved:', enableNotifications);
+    
+    // Notify background to update notification settings
+    chrome.runtime.sendMessage({ 
+      action: 'updateNotificationSetting', 
+      enableNotifications 
     });
   });
 }

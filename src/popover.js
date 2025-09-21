@@ -71,7 +71,10 @@ function init() {
 function setupEventListeners() {
   signInBtn.addEventListener('click', handleSignIn);
   closePopoverBtn.addEventListener('click', closePopover);
-  submitCommentBtn.addEventListener('click', submitComment);
+  submitCommentBtn.addEventListener('click', () => {
+    const textToSubmit = commentTextField.value;
+    submitComment(textToSubmit);
+  });
   
   // Enable/disable submit button based on input
   commentTextField.addEventListener('input', () => {
@@ -124,7 +127,6 @@ function checkAuthState(callback) {
             currentUser = retryResponse.user;
             authStateChecked = true; // Mark as checked
             const isSignedIn = retryResponse.isSignedIn || false;
-            console.log('Auth state in popover (retry):', isSignedIn, currentUser);
             if (callback) callback(isSignedIn);
           } else {
             authStateChecked = true; // Mark as checked even if failed
@@ -139,7 +141,6 @@ function checkAuthState(callback) {
       currentUser = response.user;
       authStateChecked = true; // Mark as checked
       const isSignedIn = response.isSignedIn || false;
-      console.log('Auth state in popover:', isSignedIn, currentUser); // Debug log
       if (callback) callback(isSignedIn);
     } else {
       authStateChecked = true; // Mark as checked even if no response
@@ -206,18 +207,12 @@ function initialLoad() {
 }
 
 function updateAuthUI(isSignedIn) {
-  console.log('Updating auth UI - isSignedIn:', isSignedIn, 'currentUser:', currentUser);
-  console.log('authRequired element:', authRequired);
-  console.log('commentInput element:', commentInput);
-  
   if (!authRequired || !commentInput) {
-    console.error('DOM elements not found!', { authRequired, commentInput });
     return;
   }
   
   if (isSignedIn && currentUser) {
     // User is signed in - show comment input, hide auth prompt
-    console.log('User signed in, hiding auth prompt and showing comment input');
     authRequired.style.display = 'none';
     authRequired.classList.add('hidden');
     commentInput.style.display = 'block';
@@ -232,7 +227,6 @@ function updateAuthUI(isSignedIn) {
     }
   } else {
     // User is not signed in - hide comment input, show auth prompt
-    console.log('User not signed in, showing auth prompt and hiding comment input');
     commentInput.style.display = 'none';
     commentInput.classList.add('hidden');
     authRequired.style.display = 'block';
@@ -664,7 +658,6 @@ window.addEventListener('message', (event) => {
   if (event.data.type === 'authStateChanged') {
     currentUser = event.data.user;
     authStateChecked = true; // Update cached state
-    console.log('Auth state changed in popover:', currentUser); // Debug log
     
     if (isInitialLoad && currentPageUrl) {
       // If still in initial load and we now have page info, complete the load

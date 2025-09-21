@@ -1,7 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCredential, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, query, where, getDocs, onSnapshot, orderBy } from 'firebase/firestore';
 import { firebaseConfig, COLLECTIONS } from '../lib/firebase-config.js';
+import { showNewCommentNotification, showReactionNotification, showUpvoteNotification } from './notifications.js';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -14,7 +15,6 @@ chrome.action.onClicked.addListener((tab) => {
   
   // Check if user is authenticated
   const user = auth.currentUser;
-  console.log('Action clicked, current user:', user); // Debug log
   
   // Send message to check current state and toggle
   chrome.tabs.sendMessage(tabId, {
@@ -48,7 +48,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.identity.getAuthToken({ interactive: false }, (token) => {
           if (chrome.runtime.lastError) {
             // No token to revoke, which is fine
-            console.log('No auth token to revoke on sign out');
             return;
           }
           
@@ -59,7 +58,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`, {
                 method: 'POST',
               }).then(() => {
-                console.log('Token revoked successfully');
               }).catch(error => {
                 console.error('Error revoking token:', error);
               });
@@ -141,7 +139,6 @@ async function handleSignIn() {
       chrome.identity.getAuthToken({ interactive: false }, (existingToken) => {
         if (chrome.runtime.lastError) {
           // OAuth2 not granted or other error - just continue
-          console.log('No previous auth token to revoke');
           resolve();
           return;
         }
@@ -153,7 +150,6 @@ async function handleSignIn() {
             fetch(`https://accounts.google.com/o/oauth2/revoke?token=${existingToken}`, {
               method: 'POST',
             }).then(() => {
-              console.log('Previous token revoked');
               resolve();
             }).catch(() => {
               // Even if revoke fails, continue
@@ -206,7 +202,10 @@ async function handleSignIn() {
 // Monitor auth state changes
 onAuthStateChanged(auth, (user) => {
   if (user) {
-    console.log('User signed in:', user.email);
+    
+    // Set up notification listeners for this user
+    setupNotificationListeners(user);
+    
     // Notify all tabs about auth state change
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
@@ -223,7 +222,12 @@ onAuthStateChanged(auth, (user) => {
       });
     });
   } else {
-    console.log('User signed out');
+    
+    // Clean up notification listeners on sign out
+    notificationListeners.forEach(unsubscribe => unsubscribe());
+    notificationListeners = [];
+    previousCommentStates.clear();
+    
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, {
@@ -274,7 +278,157 @@ async function getPageComments(url) {
   }
 }
 
-// Clean up when tab is closed (no longer needed since we don't track state)
+// Set up real-time listeners for notifications
+let notificationListeners = [];
+let previousCommentStates = new Map(); // Track previous states for comparison
+
+
+function setupNotificationListeners(currentUser) {
+  // Clean up any existing listeners
+  notificationListeners.forEach(unsubscribe => unsubscribe());
+  notificationListeners = [];
+  previousCommentStates.clear();
+  
+  
+  // Track processed notifications to avoid duplicates
+  const processedNotifications = new Set();
+  
+  // Store the current time to only process new comments
+  const listenerStartTime = new Date();
+  
+  // Listen for new comments on user's highlights across all pages
+  const commentsQuery = query(
+    collection(db, COLLECTIONS.COMMENTS),
+    orderBy('timestamp', 'desc')
+  );
+  
+  const unsubscribe = onSnapshot(commentsQuery, (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      const comment = change.doc.data();
+      const commentId = change.doc.id;
+      
+      if (change.type === 'added') {
+        // Skip if we've already processed this notification
+        if (processedNotifications.has(commentId)) return;
+        processedNotifications.add(commentId);
+        
+        // Skip old comments (only notify for comments created after listener started)
+        const commentTime = comment.timestamp?.toDate?.() || new Date();
+        if (commentTime < listenerStartTime) {
+          return;
+        }
+        
+        // Store initial state only for new comments (not old ones)
+        previousCommentStates.set(commentId, {
+          upvotes: comment.upvotes || [],
+          reactions: comment.reactions || {}
+        });
+        
+        // Don't notify for user's own comments
+        if (comment.userId === currentUser.uid) return;
+        
+        // Check if this comment is on the same text as one of user's comments
+        checkIfReplyToUser(comment, currentUser.uid).then(isReply => {
+          if (isReply) {
+            showNewCommentNotification({
+              ...comment,
+              id: commentId,
+              url: comment.url,
+              anchor: comment.anchor
+            });
+          }
+        });
+      }
+      
+      if (change.type === 'modified') {
+        // Skip if we don't have a previous state (means it's an old comment)
+        if (!previousCommentStates.has(commentId)) {
+          // Store current state for future comparisons
+          previousCommentStates.set(commentId, {
+            upvotes: comment.upvotes || [],
+            reactions: comment.reactions || {}
+          });
+          return; // Don't notify for first modification we see
+        }
+        
+        // Get the previous state
+        const previousState = previousCommentStates.get(commentId);
+        
+        // Check for new reactions on user's comments
+        if (comment.userId === currentUser.uid && comment.reactions) {
+          const oldReactionCount = Object.values(previousState.reactions || {})
+            .reduce((sum, users) => sum + users.length, 0);
+          const newReactionCount = Object.values(comment.reactions || {})
+            .reduce((sum, users) => sum + users.length, 0);
+          
+          if (newReactionCount > oldReactionCount) {
+            // Find the new reaction
+            for (const [emoji, users] of Object.entries(comment.reactions)) {
+              const oldUsers = previousState.reactions?.[emoji] || [];
+              const newUsers = users.filter(u => !oldUsers.includes(u) && u !== currentUser.uid);
+              
+              if (newUsers.length > 0) {
+                showReactionNotification('Someone', emoji, {
+                  ...comment,
+                  id: commentId,
+                  url: comment.url,
+                  anchor: comment.anchor
+                });
+              }
+            }
+          }
+        }
+        
+        // Check for new upvotes on user's comments
+        if (comment.userId === currentUser.uid) {
+          const oldUpvotes = previousState.upvotes || [];
+          const newUpvotes = comment.upvotes || [];
+          
+          if (newUpvotes.length > oldUpvotes.length) {
+            const newVoters = newUpvotes.filter(u => !oldUpvotes.includes(u) && u !== currentUser.uid);
+            if (newVoters.length > 0) {
+              showUpvoteNotification('Someone', {
+                ...comment,
+                id: commentId,
+                url: comment.url,
+                anchor: comment.anchor
+              });
+            }
+          }
+        }
+        
+        // Update the stored state for next comparison
+        previousCommentStates.set(commentId, {
+          upvotes: comment.upvotes || [],
+          reactions: comment.reactions || {}
+        });
+      }
+    });
+  });
+  
+  notificationListeners.push(unsubscribe);
+}
+
+// Helper function to check if a comment is a reply to the user
+async function checkIfReplyToUser(comment, userId) {
+  // Check if the comment is on the same anchor as any of the user's comments
+  try {
+    const q = query(
+      collection(db, COLLECTIONS.COMMENTS),
+      where('url', '==', comment.url),
+      where('anchor.selectedText', '==', comment.anchor?.selectedText),
+      where('userId', '==', userId)
+    );
+    
+    const snapshot = await getDocs(q);
+    return !snapshot.empty;
+  } catch (error) {
+    console.error('Error checking reply status:', error);
+    return false;
+  }
+}
+
+// (Auth state listener moved above to consolidate)
 
 // Export for bundling
 export { db };

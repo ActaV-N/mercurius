@@ -2,7 +2,8 @@
 let popoverIframe = null;
 let authPopoverIframe = null;
 let currentUser = null;
-let highlights = new Map(); // Store active highlights
+let highlights = new Map(); // Store active highlights by unique text key
+let highlightToComments = new Map(); // Map highlight key to comment IDs
 let pageComments = []; // Store comments for current page
 
 // Inject highlight styles
@@ -55,7 +56,6 @@ async function loadPageHighlights() {
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'toggleAuthPopover') {
-    console.log('Received toggleAuthPopover:', request);
     // Update current user if provided
     if (request.user) {
       currentUser = request.user;
@@ -74,7 +74,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Pass auth state to the auth popover
       setTimeout(() => {
         if (authPopoverIframe) {
-          console.log('Sending auth state to auth popover:', request.user, request.isAuthenticated);
           authPopoverIframe.contentWindow.postMessage({
             type: 'authStateUpdate',
             user: request.user,
@@ -109,6 +108,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     highlightElements.forEach(el => {
       el.style.display = request.showHighlights ? '' : 'none';
     });
+  }
+  
+  if (request.action === 'openCommentFromNotification') {
+    // Open popover for a specific comment from notification
+    const { commentId, anchor } = request;
+    
+    // Wait for page to be ready
+    setTimeout(() => {
+      // Find or create the highlight for this comment
+      if (anchor) {
+        applyHighlight(anchor, commentId);
+      }
+      
+      // Open the popover
+      createPopover(window.innerWidth - 420, 100);
+      
+      // Send the anchor and page info to popover
+      setTimeout(() => {
+        if (popoverIframe) {
+          popoverIframe.contentWindow.postMessage({
+            type: 'pageLoaded',
+            url: window.location.href,
+            anchor: anchor
+          }, '*');
+          
+          // Scroll to the specific comment
+          if (commentId) {
+            popoverIframe.contentWindow.postMessage({
+              type: 'scrollToCommentInList',
+              commentId: commentId
+            }, '*');
+          }
+        }
+      }, 500);
+    }, 1000); // Give page time to fully load
   }
 });
 
@@ -314,14 +348,33 @@ function handleTextSelection(event) {
   // Ignore selections in our popover
   if (event.target.closest('#mercurius-popover-container')) return;
   
+  // Check if clicking on the comment button FIRST (before other checks)
+  if (event.target.id === 'mercurius-comment-button' || 
+      event.target.closest('#mercurius-comment-button')) {
+    return; // Don't process further if clicking the button
+  }
+  
   // Check if clicking on a highlight
   const highlightEl = event.target.closest('.mercurius-highlight');
   if (highlightEl) {
-    // Find the anchor for this highlight
-    const commentId = highlightEl.dataset.commentId;
-    const comment = pageComments.find(c => c.id === commentId);
+    // Get comment IDs from the highlight
+    const commentIds = highlightEl.dataset.commentIds?.split(',') || [];
     
-    if (comment && comment.anchor) {
+    // Get the highlight key to find the anchor
+    const highlightKey = highlightEl.dataset.highlightKey;
+    
+    // Find any comment with matching IDs to get the anchor
+    let anchor = null;
+    for (const commentId of commentIds) {
+      const comment = pageComments.find(c => c.id === commentId);
+      if (comment && comment.anchor) {
+        anchor = comment.anchor;
+        break;
+      }
+    }
+    
+    // If we found an anchor, open the popover
+    if (anchor) {
       const rect = highlightEl.getBoundingClientRect();
       createPopover(rect.right + 10, rect.top);
       
@@ -331,22 +384,11 @@ function handleTextSelection(event) {
           popoverIframe.contentWindow.postMessage({
             type: 'pageLoaded',
             url: window.location.href,
-            anchor: comment.anchor
-          }, '*');
-          
-          popoverIframe.contentWindow.postMessage({
-            type: 'scrollToCommentInList',
-            commentId: commentId
+            anchor: anchor
           }, '*');
         }
       }, 500);
     }
-    return;
-  }
-  
-  // Ignore if clicking on the comment button itself
-  if (event.target.id === 'mercurius-comment-button' || 
-      event.target.closest('#mercurius-comment-button')) {
     return;
   }
   
@@ -360,46 +402,70 @@ function handleTextSelection(event) {
     // Show comment button near selection
     showCommentButton(event.pageX, event.pageY, anchor);
   } else {
-    // Only hide if not clicking the button
-    setTimeout(() => {
-      if (!event.target.closest('#mercurius-comment-button')) {
-        hideCommentButton();
-      }
-    }, 100);
+    // Hide button if there's no selection
+    hideCommentButton();
   }
 }
 
 // Create anchor data from selection
 function createAnchorFromSelection(range, selectedText) {
-  const container = range.commonAncestorContainer;
-  const element = container.nodeType === Node.TEXT_NODE ? 
-    container.parentElement : container;
+  // Get the actual selected text and its position in the document
+  const startContainer = range.startContainer;
+  const endContainer = range.endContainer;
+  
+  // Find the common ancestor element
+  const commonAncestor = range.commonAncestorContainer;
+  const element = commonAncestor.nodeType === Node.TEXT_NODE ? 
+    commonAncestor.parentElement : commonAncestor;
   
   // Get CSS selector path
   const selector = getElementSelector(element);
   
-  // Get context before and after
-  const fullText = element.textContent;
-  const selectionStart = range.startOffset;
-  const selectionEnd = range.endOffset;
+  // Calculate the exact position by walking through all text nodes
+  let currentOffset = 0;
+  let actualStartOffset = -1;
+  let actualEndOffset = -1;
   
-  const contextBefore = fullText.substring(
-    Math.max(0, selectionStart - 20), 
-    selectionStart
+  const walker = document.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+    null,
+    false
   );
-  const contextAfter = fullText.substring(
-    selectionEnd, 
-    Math.min(fullText.length, selectionEnd + 20)
-  );
+  
+  let node;
+  while (node = walker.nextNode()) {
+    const nodeLength = node.textContent.length;
+    
+    // Check if this is the start container
+    if (node === startContainer) {
+      actualStartOffset = currentOffset + range.startOffset;
+    }
+    
+    // Check if this is the end container
+    if (node === endContainer) {
+      actualEndOffset = currentOffset + range.endOffset;
+    }
+    
+    currentOffset += nodeLength;
+  }
+  
+  // If we didn't find the positions, fall back to searching for the text
+  if (actualStartOffset === -1 || actualEndOffset === -1) {
+    const fullText = element.textContent;
+    const textIndex = fullText.indexOf(selectedText);
+    if (textIndex !== -1) {
+      actualStartOffset = textIndex;
+      actualEndOffset = textIndex + selectedText.length;
+    }
+  }
   
   return {
     url: window.location.href,
     selector: selector,
     selectedText: selectedText,
-    startOffset: selectionStart,
-    endOffset: selectionEnd,
-    contextBefore: contextBefore,
-    contextAfter: contextAfter,
+    startOffset: actualStartOffset,
+    endOffset: actualEndOffset,
     timestamp: Date.now()
   };
 }
@@ -445,39 +511,59 @@ function showCommentButton(x, y, anchor) {
   
   currentAnchor = anchor;
   
+  // Get the selection to position based on selected text
+  const selection = window.getSelection();
+  if (selection.rangeCount === 0) return;
+  
+  const range = selection.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+  
   commentButton = document.createElement('button');
   commentButton.id = 'mercurius-comment-button';
-  commentButton.innerHTML = '💬';
+  
+  // Create comment icon similar to the reference image
+  commentButton.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 6px;">
+      <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z" fill="currentColor"/>
+    </svg>
+    Comment
+  `;
   commentButton.title = 'Add comment';
   
-  // Use absolute positioning with pageX/pageY
+  // Position based on selected text, not mouse position
+  const buttonTop = rect.top + window.pageYOffset - 40;
+  const buttonLeft = rect.left + window.pageXOffset + (rect.width / 2) - 50; // Center above selection
+  
   commentButton.style.cssText = `
     position: absolute;
-    left: ${x + 10}px;
-    top: ${y - 35}px;
+    left: ${buttonLeft}px;
+    top: ${buttonTop}px;
     z-index: 2147483647;
-    background: #4285f4;
+    background: #2c3e50;
     color: white;
     border: none;
-    border-radius: 50%;
-    width: 35px;
-    height: 35px;
+    border-radius: 6px;
+    padding: 6px 12px;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    font-size: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    font-size: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s;
+    transition: all 0.2s ease;
+    white-space: nowrap;
   `;
   
   // Add hover effect
   commentButton.addEventListener('mouseenter', () => {
-    commentButton.style.transform = 'scale(1.1)';
+    commentButton.style.background = '#34495e';
+    commentButton.style.transform = 'translateY(-2px)';
   });
   
   commentButton.addEventListener('mouseleave', () => {
-    commentButton.style.transform = 'scale(1)';
+    commentButton.style.background = '#2c3e50';
+    commentButton.style.transform = 'translateY(0)';
   });
   
   commentButton.addEventListener('mousedown', (e) => {
@@ -488,12 +574,11 @@ function showCommentButton(x, y, anchor) {
   commentButton.addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
-    console.log('Comment button clicked!'); // Debug log
     
     // Get position for popover (to the right of the button)
     const rect = commentButton.getBoundingClientRect();
     openCommentDialog(currentAnchor, rect.right + 10, rect.top);
-    hideCommentButton();
+    // Don't hide the button immediately - let it fade out naturally
   });
   
   document.body.appendChild(commentButton);
@@ -553,29 +638,53 @@ function applyHighlight(anchor, commentId) {
     const element = document.querySelector(anchor.selector);
     if (!element) return;
     
-    // Check if already highlighted
-    if (highlights.has(commentId)) return;
+    // Create a unique key for this highlight based on selector, text, and position
+    const highlightKey = `${anchor.selector}::${anchor.startOffset}::${anchor.endOffset}::${anchor.selectedText}`;
     
-    // Check if this exact text is already highlighted anywhere in the document
-    const allHighlights = document.querySelectorAll('.mercurius-highlight');
-    for (const existing of allHighlights) {
-      if (existing.textContent === anchor.selectedText) {
-        // This exact text is already highlighted, just add this comment ID to tracking
-        // but don't create a new highlight
-        highlights.set(commentId, existing);
-        return;
+    // Check if this text position is already highlighted
+    if (highlights.has(highlightKey)) {
+      // Just add this comment ID to the existing highlight
+      const existingCommentIds = highlightToComments.get(highlightKey) || [];
+      if (!existingCommentIds.includes(commentId)) {
+        existingCommentIds.push(commentId);
+        highlightToComments.set(highlightKey, existingCommentIds);
+        
+        // Update the data attribute on the existing highlight element
+        const highlightElement = highlights.get(highlightKey);
+        if (highlightElement) {
+          highlightElement.dataset.commentIds = existingCommentIds.join(',');
+        }
       }
+      return;
     }
     
     // Check if highlights are enabled
     chrome.storage.sync.get(['showHighlights'], (result) => {
       const showHighlights = result.showHighlights !== false; // Default to true
       
-      // Search for the exact text instead of using offsets
+      // Use the stored offsets to find the exact text
       const fullText = element.textContent;
-      const textIndex = fullText.indexOf(anchor.selectedText);
       
-      if (textIndex === -1) return;
+      // Verify that the text at the stored position matches
+      const textAtPosition = fullText.substring(anchor.startOffset, anchor.endOffset);
+      
+      // ONLY use the stored position, don't search for text elsewhere
+      let textIndex;
+      let textLength = anchor.selectedText.length;
+      
+      if (textAtPosition === anchor.selectedText) {
+        // Perfect match at stored position
+        textIndex = anchor.startOffset;
+      } else {
+        // Position mismatch - don't highlight to avoid wrong text
+        console.warn('Text position mismatch, skipping highlight:', {
+          expected: anchor.selectedText,
+          found: textAtPosition,
+          startOffset: anchor.startOffset,
+          endOffset: anchor.endOffset
+        });
+        return;
+      }
       
       // Find text node containing the selected text (excluding already highlighted nodes)
       const textNodes = getTextNodesExcludingHighlights(element);
@@ -592,7 +701,15 @@ function applyHighlight(anchor, commentId) {
         if (nodeOffset <= textIndex && textIndex < nodeOffset + nodeLength) {
           targetNode = node;
           startOffset = textIndex - nodeOffset;
-          endOffset = Math.min(startOffset + anchor.selectedText.length, nodeLength);
+          // Make sure we only highlight the exact length of selected text
+          endOffset = Math.min(startOffset + textLength, nodeLength);
+          
+          // Verify the text matches exactly
+          const nodeSelectedText = nodeText.substring(startOffset, endOffset);
+          if (!anchor.selectedText.startsWith(nodeSelectedText)) {
+            // Text mismatch - skip this highlight
+            return;
+          }
           break;
         }
         nodeOffset += nodeLength;
@@ -605,7 +722,6 @@ function applyHighlight(anchor, commentId) {
       while (parentNode && parentNode !== element) {
         if (parentNode.classList && parentNode.classList.contains('mercurius-highlight')) {
           // This text is already highlighted, don't create nested highlight
-          highlights.set(commentId, parentNode);
           return;
         }
         parentNode = parentNode.parentNode;
@@ -614,8 +730,9 @@ function applyHighlight(anchor, commentId) {
       // Create highlight span
       const highlightSpan = document.createElement('span');
       highlightSpan.className = 'mercurius-highlight';
-      highlightSpan.dataset.commentId = commentId;
-      highlightSpan.title = 'Click to view comment';
+      highlightSpan.dataset.highlightKey = highlightKey;
+      highlightSpan.dataset.commentIds = commentId;
+      highlightSpan.title = 'Click to view comments';
       
       // Hide if highlights are disabled
       if (!showHighlights) {
@@ -629,13 +746,15 @@ function applyHighlight(anchor, commentId) {
       
       try {
         range.surroundContents(highlightSpan);
-        highlights.set(commentId, highlightSpan);
+        highlights.set(highlightKey, highlightSpan);
+        highlightToComments.set(highlightKey, [commentId]);
       } catch (e) {
         // If surroundContents fails, use alternative method
         const contents = range.extractContents();
         highlightSpan.appendChild(contents);
         range.insertNode(highlightSpan);
-        highlights.set(commentId, highlightSpan);
+        highlights.set(highlightKey, highlightSpan);
+        highlightToComments.set(highlightKey, [commentId]);
       }
     });
   } catch (error) {
@@ -697,23 +816,51 @@ function getTextNodesExcludingHighlights(element) {
 
 // Remove highlight
 function removeHighlight(commentId) {
-  const highlightSpan = highlights.get(commentId);
-  if (highlightSpan) {
-    const parent = highlightSpan.parentNode;
-    while (highlightSpan.firstChild) {
-      parent.insertBefore(highlightSpan.firstChild, highlightSpan);
+  // Find which highlight contains this comment
+  for (const [highlightKey, commentIds] of highlightToComments.entries()) {
+    if (commentIds.includes(commentId)) {
+      // Remove this comment ID from the list
+      const updatedIds = commentIds.filter(id => id !== commentId);
+      
+      if (updatedIds.length === 0) {
+        // No more comments for this highlight, remove it entirely
+        const highlightSpan = highlights.get(highlightKey);
+        if (highlightSpan) {
+          const parent = highlightSpan.parentNode;
+          while (highlightSpan.firstChild) {
+            parent.insertBefore(highlightSpan.firstChild, highlightSpan);
+          }
+          highlightSpan.remove();
+        }
+        highlights.delete(highlightKey);
+        highlightToComments.delete(highlightKey);
+      } else {
+        // Still have other comments, just update the data attribute
+        highlightToComments.set(highlightKey, updatedIds);
+        const highlightSpan = highlights.get(highlightKey);
+        if (highlightSpan) {
+          highlightSpan.dataset.commentIds = updatedIds.join(',');
+        }
+      }
+      break;
     }
-    highlightSpan.remove();
-    highlights.delete(commentId);
   }
 }
 
 // Refresh all highlights
 function refreshHighlights() {
   // Clear existing highlights
-  highlights.forEach((span, id) => {
-    removeHighlight(id);
+  highlights.forEach((span, key) => {
+    if (span && span.parentNode) {
+      const parent = span.parentNode;
+      while (span.firstChild) {
+        parent.insertBefore(span.firstChild, span);
+      }
+      span.remove();
+    }
   });
+  highlights.clear();
+  highlightToComments.clear();
   
   // Reapply highlights
   pageComments.forEach(comment => {
@@ -774,13 +921,21 @@ window.addEventListener('message', (event) => {
       pageComments = pageComments.filter(c => c.id !== data.commentId);
       break;
     case 'scrollToComment':
-      const highlight = highlights.get(data.commentId);
-      if (highlight) {
-        highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Find the highlight that contains this comment
+      let targetHighlight = null;
+      for (const [highlightKey, commentIds] of highlightToComments.entries()) {
+        if (commentIds.includes(data.commentId)) {
+          targetHighlight = highlights.get(highlightKey);
+          break;
+        }
+      }
+      
+      if (targetHighlight) {
+        targetHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
         // Flash effect
-        highlight.style.animation = 'mercurius-flash 0.5s ease 2';
+        targetHighlight.style.animation = 'mercurius-flash 0.5s ease 2';
         setTimeout(() => {
-          highlight.style.animation = '';
+          targetHighlight.style.animation = '';
         }, 1000);
       }
       break;
