@@ -27,6 +27,73 @@ if (document.readyState === 'loading') {
   loadPageHighlights();
 }
 
+// Listen for URL changes (for SPAs that don't use History API)
+let lastUrl = location.href;
+const urlObserver = new MutationObserver(() => {
+  const url = location.href;
+  if (url !== lastUrl) {
+    lastUrl = url;
+    // URL has changed, reload highlights for new page
+    handleUrlChange();
+  }
+});
+
+// Only observe the document body for efficiency
+if (document.body) {
+  urlObserver.observe(document.body, {subtree: true, childList: true});
+} else {
+  document.addEventListener('DOMContentLoaded', () => {
+    urlObserver.observe(document.body, {subtree: true, childList: true});
+  });
+}
+
+// Also listen for popstate events (browser back/forward)
+window.addEventListener('popstate', () => {
+  handleUrlChange();
+});
+
+// Intercept History API for SPAs
+(function() {
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  
+  history.pushState = function() {
+    originalPushState.apply(history, arguments);
+    setTimeout(() => handleUrlChange(), 0);
+  };
+  
+  history.replaceState = function() {
+    originalReplaceState.apply(history, arguments);
+    setTimeout(() => handleUrlChange(), 0);
+  };
+})();
+
+// Handle URL changes
+function handleUrlChange() {
+  // Clear existing highlights
+  highlights.forEach((span, key) => {
+    if (span && span.parentNode) {
+      const parent = span.parentNode;
+      while (span.firstChild) {
+        parent.insertBefore(span.firstChild, span);
+      }
+      span.remove();
+    }
+  });
+  highlights.clear();
+  highlightToComments.clear();
+  pageComments = [];
+  
+  // Hide any open popovers
+  removePopover();
+  hideCommentButton();
+  
+  // Load highlights for new URL
+  setTimeout(() => {
+    loadPageHighlights();
+  }, 500); // Small delay to ensure DOM is ready
+}
+
 // Check auth state on initialization
 function checkInitialAuthState() {
   chrome.runtime.sendMessage({ action: 'getAuthState' }, (response) => {
