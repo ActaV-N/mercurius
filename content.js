@@ -677,12 +677,7 @@ function applyHighlight(anchor, commentId) {
         textIndex = anchor.startOffset;
       } else {
         // Position mismatch - don't highlight to avoid wrong text
-        console.warn('Text position mismatch, skipping highlight:', {
-          expected: anchor.selectedText,
-          found: textAtPosition,
-          startOffset: anchor.startOffset,
-          endOffset: anchor.endOffset
-        });
+        // Text position mismatch - skip to avoid highlighting wrong text
         return;
       }
       
@@ -758,7 +753,7 @@ function applyHighlight(anchor, commentId) {
       }
     });
   } catch (error) {
-    console.error('Error applying highlight:', error);
+    // Silently fail - highlight may not be possible for this element
   }
 }
 

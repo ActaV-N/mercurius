@@ -15,6 +15,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { firebaseConfig, COLLECTIONS, REACTIONS } from '../lib/firebase-config.js';
+import { formatRelativeTime, sortComments } from '../lib/utils.js';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -119,7 +120,6 @@ function checkAuthState(callback) {
   
   chrome.runtime.sendMessage({ action: 'getAuthState' }, (response) => {
     if (chrome.runtime.lastError) {
-      console.error('Error getting auth state:', chrome.runtime.lastError);
       // Try again after a short delay
       setTimeout(() => {
         chrome.runtime.sendMessage({ action: 'getAuthState' }, (retryResponse) => {
@@ -279,23 +279,14 @@ function loadComments(callback) {
       });
     });
     
-    // Sort by upvote count (descending), then by timestamp (newest first) as tiebreaker
-    comments.sort((a, b) => {
-      const upvoteDiff = b.upvoteCount - a.upvoteCount;
-      if (upvoteDiff !== 0) return upvoteDiff;
-      
-      // If upvotes are equal, sort by timestamp (newest first)
-      const aTime = a.timestamp?.toDate?.() || new Date(0);
-      const bTime = b.timestamp?.toDate?.() || new Date(0);
-      return bTime.getTime() - aTime.getTime();
-    });
+    // Sort comments by upvotes then timestamp
+    comments = sortComments(comments);
     
     if (callback) callback();
     if (!isInitialLoad) {
       renderComments();
     }
   }, (error) => {
-    console.error('Error loading comments:', error);
     if (callback) callback();
     if (!isInitialLoad) {
       loadingState.classList.add('hidden');
@@ -339,7 +330,7 @@ function createCommentElement(comment) {
   avatar.alt = comment.userName;
   
   clone.querySelector('.comment-author').textContent = comment.userName;
-  clone.querySelector('.comment-time').textContent = formatTime(comment.timestamp);
+  clone.querySelector('.comment-time').textContent = formatRelativeTime(comment.timestamp);
   
   // Hide anchor text since we're only showing comments for specific text
   const anchorEl = clone.querySelector('.comment-anchor');
@@ -446,7 +437,6 @@ async function submitComment(textToSubmit) {
     }, '*');
     
   } catch (error) {
-    console.error('Error adding comment:', error);
     alert(`Failed to add comment: ${error.message}`);
   }
 }
@@ -496,7 +486,7 @@ async function handleVote(commentId, voteType) {
       }
     }
   } catch (error) {
-    console.error('Error updating vote:', error);
+    // Silently fail vote update
   }
 }
 
@@ -524,7 +514,7 @@ async function handleReaction(commentId, emoji) {
     
     await updateDoc(commentRef, { reactions });
   } catch (error) {
-    console.error('Error updating reaction:', error);
+    // Silently fail reaction update
   }
 }
 
@@ -538,7 +528,6 @@ async function handleCommentMenu(commentId) {
       data: { commentId }
     }, '*');
   } catch (error) {
-    console.error('Error deleting comment:', error);
     alert('Failed to delete comment');
   }
 }
@@ -600,24 +589,7 @@ function closePopover() {
   window.parent.postMessage({ type: 'closePopover' }, '*');
 }
 
-function formatTime(timestamp) {
-  if (!timestamp) return '';
-  
-  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  const now = new Date();
-  const diff = now - date;
-  
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 30) return `${days}d ago`;
-  
-  return date.toLocaleDateString();
-}
+// Removed - using formatRelativeTime from utils.js instead
 
 // Listen for messages from parent window
 window.addEventListener('message', (event) => {

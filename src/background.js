@@ -26,8 +26,8 @@ chrome.action.onClicked.addListener((tab) => {
       displayName: user.displayName,
       photoURL: user.photoURL
     } : null
-  }).catch(error => {
-    console.error('Error sending message to tab:', error);
+  }).catch(() => {
+    // Tab might not have content script loaded
   });
 });
 
@@ -58,8 +58,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`, {
                 method: 'POST',
               }).then(() => {
-              }).catch(error => {
-                console.error('Error revoking token:', error);
+              }).catch(() => {
+                // Revoke might fail but continue anyway
               });
             });
           }
@@ -92,8 +92,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getPageComments') {
     getPageComments(request.url)
       .then(comments => sendResponse({ comments }))
-      .catch(error => {
-        console.error('Error fetching comments:', error);
+      .catch(() => {
         sendResponse({ comments: [] });
       });
     return true; // Will respond asynchronously
@@ -114,7 +113,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           });
         });
       })
-      .catch(error => console.error('Auth flow error:', error));
+      .catch(() => {});
   }
   
   // Handle highlight setting change
@@ -194,7 +193,6 @@ async function handleSignIn() {
       photoURL: result.user.photoURL
     };
   } catch (error) {
-    console.error('Sign in error:', error);
     throw error;
   }
 }
@@ -272,7 +270,6 @@ async function getPageComments(url) {
     
     return comments;
   } catch (error) {
-    console.error('Error fetching page comments:', error);
     // Return empty array if not authenticated or error
     return [];
   }
@@ -423,7 +420,6 @@ async function checkIfReplyToUser(comment, userId) {
     const snapshot = await getDocs(q);
     return !snapshot.empty;
   } catch (error) {
-    console.error('Error checking reply status:', error);
     return false;
   }
 }

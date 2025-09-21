@@ -46,7 +46,6 @@ function handleSignIn() {
       updateAuthUI(true);
       // Don't auto-close - let user close manually or click sign out
     } else {
-      console.error('Sign in failed:', response.error);
       alert('Sign in failed. Please try again.');
     }
   });
@@ -113,8 +112,6 @@ function handleHighlightToggle() {
   
   // Save to storage
   chrome.storage.sync.set({ showHighlights }, () => {
-    console.log('Highlight setting saved:', showHighlights);
-    
     // Notify all tabs to update their highlights
     chrome.runtime.sendMessage({ 
       action: 'highlightSettingChanged', 
@@ -129,8 +126,6 @@ function handleNotificationToggle() {
   
   // Save to storage
   chrome.storage.sync.set({ enableNotifications }, () => {
-    console.log('Notification setting saved:', enableNotifications);
-    
     // Notify background to update notification settings
     chrome.runtime.sendMessage({ 
       action: 'updateNotificationSetting', 
@@ -141,7 +136,6 @@ function handleNotificationToggle() {
 
 // Listen for messages from parent window
 window.addEventListener('message', (event) => {
-  console.log('Auth popover received message:', event.data);
   if (event.data.type === 'authStateUpdate') {
     currentUser = event.data.user;
     updateAuthUI(event.data.isAuthenticated);
