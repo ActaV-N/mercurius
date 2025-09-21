@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mercurius Comments</title>
+  <link rel="stylesheet" href="popover.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="popover-header">
+    <div class="header-content">
+      <h1 class="app-title">Mercurius</h1>
+      <div class="header-actions">
+        <button id="close-popover" class="icon-btn" title="Close">✕</button>
+      </div>
+    </div>
+    
+    <!-- Selected Text Display -->
+    <div id="selected-text-display" class="selected-text-display hidden">
+      <div id="selected-text-content" class="selected-text-content"></div>
+    </div>
+  </header>
+  
+  <!-- Main Content -->
+  <main class="popover-main">
+    <!-- Comments List -->
+    <div id="comments-section" class="comments-section">
+      <!-- Loading State -->
+      <div id="loading-state" class="loading-state">
+        <div class="spinner"></div>
+        <p>Loading comments...</p>
+      </div>
+      
+      <!-- Empty State -->
+      <div id="empty-state" class="empty-state hidden">
+        <p>No comments yet.</p>
+        <p class="hint">Be the first to comment!</p>
+      </div>
+      
+      <!-- Comments Container -->
+      <div id="comments-container" class="comments-container hidden">
+        <!-- Comments will be dynamically inserted here -->
+      </div>
+    </div>
+  </main>
+  
+  <!-- Bottom Input Section -->
+  <footer class="popover-footer">
+    <!-- Auth Required Message -->
+    <div id="auth-required" class="auth-required hidden">
+      <p>Sign in to add comments</p>
+      <button id="sign-in-btn" class="primary-btn">Sign in with Google</button>
+    </div>
+    
+    <!-- Comment Input -->
+    <div id="comment-input" class="comment-input hidden">
+      <div class="input-container">
+        <img id="user-avatar-input" class="user-avatar-small" src="" alt="">
+        <input 
+          type="text"
+          id="comment-text" 
+          class="comment-input-field"
+          placeholder="Reply..."
+          maxlength="500">
+        <button id="submit-comment" class="submit-btn" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </footer>
+  
+  <!-- Minimized State -->
+  <div id="minimized-badge" class="minimized-badge hidden">
+    <button id="restore-btn" class="badge-btn">
+      💬 <span id="badge-count">0</span>
+    </button>
+  </div>
+  
+  <!-- Comment Template -->
+  <template id="comment-template">
+    <div class="comment-card" data-comment-id="">
+      <div class="comment-header">
+        <img class="comment-avatar" src="" alt="">
+        <div class="comment-meta">
+          <span class="comment-author"></span>
+          <span class="comment-time"></span>
+        </div>
+        <button class="icon-btn comment-menu" title="Delete comment">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="comment-anchor">
+        <span class="anchor-text"></span>
+      </div>
+      
+      <div class="comment-body">
+        <p class="comment-text"></p>
+      </div>
+      
+      <div class="reaction-section">
+        <button class="add-reaction-btn" title="Add reaction">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm3.82 1.636a.75.75 0 0 1 1.038.175l.007.009c.103.118.22.222.35.31.264.178.683.37 1.285.37.602 0 1.02-.192 1.285-.371.13-.088.247-.192.35-.31l.007-.008a.75.75 0 0 1 1.222.87l-.022.015c-.02.013-.087.06-.177.118-.18.117-.401.24-.666.372-.53.265-1.277.528-1.999.528-.722 0-1.468-.263-1.999-.528a3.5 3.5 0 0 1-.666-.372 1.847 1.847 0 0 1-.177-.118l-.022-.015a.75.75 0 0 1 .184-1.045ZM4 6.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 4 6.25Zm5 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 9 6.25Z"/>
+          </svg>
+        </button>
+        <div class="existing-reactions"></div>
+      </div>
+      
+      <div class="comment-actions">
+        <div class="vote-buttons">
+          <button class="vote-btn upvote" data-vote="up">
+            <span class="vote-icon">▲</span>
+            <span class="vote-count">0</span>
+          </button>
+          <button class="vote-btn downvote" data-vote="down">
+            <span class="vote-icon">▼</span>
+            <span class="vote-count">0</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+  
+  <!-- Emoji Picker Popup -->
+  <div id="emoji-picker" class="emoji-picker hidden">
+    <div class="emoji-picker-content">
+      <button class="emoji-option" data-emoji="👍">👍</button>
+      <button class="emoji-option" data-emoji="👎">👎</button>
+      <button class="emoji-option" data-emoji="😄">😄</button>
+      <button class="emoji-option" data-emoji="🎉">🎉</button>
+      <button class="emoji-option" data-emoji="😕">😕</button>
+      <button class="emoji-option" data-emoji="❤️">❤️</button>
+      <button class="emoji-option" data-emoji="🚀">🚀</button>
+      <button class="emoji-option" data-emoji="👀">👀</button>
+    </div>
+  </div>
+  
+  <!-- Scripts -->
+  <script src="../dist/popover-bundle.js"></script>
+</body>
+</html>

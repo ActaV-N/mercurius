@@ -1,0 +1,58 @@
+/* Highlight styles for commented text */
+.mercurius-highlight {
+  background-color: rgba(255, 235, 59, 0.3);
+  border-bottom: 2px solid rgba(255, 193, 7, 0.5);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.mercurius-highlight:hover {
+  background-color: rgba(255, 235, 59, 0.5);
+  border-bottom-color: rgba(255, 193, 7, 0.8);
+}
+
+/* Multiple overlapping highlights */
+.mercurius-highlight.multiple {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 235, 59, 0.3) 0%,
+    rgba(255, 193, 7, 0.3) 50%,
+    rgba(255, 235, 59, 0.3) 100%
+  );
+}
+
+/* Flash animation for scrolled-to highlights */
+@keyframes mercurius-flash {
+  0% {
+    background-color: rgba(255, 235, 59, 0.3);
+  }
+  50% {
+    background-color: rgba(255, 193, 7, 0.8);
+  }
+  100% {
+    background-color: rgba(255, 235, 59, 0.3);
+  }
+}
+
+/* Comment button that appears after text selection */
+#mercurius-comment-button {
+  animation: mercurius-fade-in 0.2s ease;
+}
+
+@keyframes mercurius-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Sidebar container adjustment */
+body.mercurius-sidebar-open {
+  margin-right: 350px !important;
+  transition: margin-right 0.3s ease;
+}
