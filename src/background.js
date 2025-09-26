@@ -1,6 +1,6 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCredential, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, query, where, getDocs, onSnapshot, orderBy } from 'firebase/firestore';
+import { initializeApp } from '@firebase/app';
+import { getAuth, signInWithCredential, GoogleAuthProvider, onAuthStateChanged } from '@firebase/auth';
+import { getFirestore, collection, query, where, getDocs, onSnapshot, orderBy } from '@firebase/firestore';
 import { firebaseConfig, COLLECTIONS } from '../lib/firebase-config.js';
 import { showNewCommentNotification, showReactionNotification, showUpvoteNotification } from './notifications.js';
 

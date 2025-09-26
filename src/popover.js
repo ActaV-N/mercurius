@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp } from '@firebase/app';
 import { 
   getFirestore, 
   collection, 
@@ -13,7 +13,7 @@ import {
   arrayUnion,
   arrayRemove,
   serverTimestamp
-} from 'firebase/firestore';
+} from '@firebase/firestore';
 import { firebaseConfig, COLLECTIONS, REACTIONS } from '../lib/firebase-config.js';
 import { formatRelativeTime, sortComments } from '../lib/utils.js';
 
